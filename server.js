@@ -4,6 +4,7 @@ const Route = require("koa-router")
 const router = new Route()
 const cors = require("koa2-cors")
 const koaBody = require("koa-body")
+const koaStatic = require("koa-static")
 const fs = require("fs")
 const path = require("path")
 
@@ -15,6 +16,8 @@ app.use(cors({
   allowHeaders: ["Content-Type", "Authorization", "Accept"],
   exposeHeaders: ["WWW-Authenticate", "Server-Authorization"]
 }))
+
+app.use(koaStatic(path.resolve(__dirname, "static")))
 
 app.use(koaBody({
   multipart: true,
@@ -35,29 +38,39 @@ router.get("/file", async ctx => {
 const statusEnum = [
   {
     code: 200,
-    msg: '上傳成功'
+    msg: '上傳成功',
+    success: true,
+    errorList: {
+
+    }
   },
   {
-    code: 405,
-    msg: '导入失败，存在错误数据，请下载导入错误结果查看错误原因修正后，可上传该文件重新导入',
-    downloadErrorUrl: 'http://localhost:7776/download'
+    errorMsg: '导入失败，存在错误数据，请下载导入错误结果查看错误原因修正后，可上传该文件重新导入',
+    success: false,
+    errorList: {
+      failPath: 'http://localhost:5000/file',
+    }
   },
   {
-    code: 500,
-    msg: '服務器內部錯誤',
+    success: false,
+    errorMsg: '导入失败，存在错误数据，请下载导入错误结果查看错误原因修正后，可上传该文件重新导入',
+    errorList: {
+      failPath: 'http://localhost:5000/file',
+    }
   }
 ]
 router.post("/test", async ctx => {
-  const file = ctx.request.files.file;
+  // const file = ctx.request.files.file;
   try {
-    await upload(file)
+    // await upload(file)
+    // console.log(file);
     const random = Math.floor(Math.random() * 3)
-    ctx.body = statusEnum[random]
+    ctx.body = statusEnum[1]
   } catch (error) {
     console.log(error);
     ctx.body = statusEnum[2]
   }
-  
+
 })
 
 function upload(file) {
@@ -87,6 +100,7 @@ router.post("/upload/merge", async ctx => {
   ctx.body = {
     filename,
     extName,
+    url: `${ctx.protocol}://${ctx.host}/${filename}${extName}`
   }
 })
 
@@ -144,4 +158,4 @@ async function mergeChunks(filename, extName) {
 }
 
 
-app.listen(5000, () => console.log('http://localhost:5000'))
+app.listen(8562, () => console.log('http://localhost:8562'))

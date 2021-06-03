@@ -3,8 +3,8 @@ import axios from "axios"
 import './App.css';
 
 const xhr = axios.create({
-  baseURL: "http://localhost:5000",
-  timeout: 6000 * 60
+  baseURL: "http://localhost:8562",
+  timeout: 6000 * 60,
 })
 
 /**
@@ -20,7 +20,12 @@ const produceFile = (cb) => {
   })
 }
 
-const isAllowedFileType = (file) => {
+/**
+ * 获取文件后缀
+ * @param file {File} 目标文件
+ * @return {string} 后缀名
+ */
+const getFileExtName = (file) => {
   const extReg = /(\.[^.]+)$/
   extReg.test(file.name)
   return RegExp.$1
@@ -42,6 +47,12 @@ const createFileChunks = (file, chunkSize) => {
   return fileChunkList
 }
 
+async function requestNext(requestPromiseList) {
+  if(!requestPromiseList.length) return
+  await Promise.all(requestPromiseList.splice(0, 1))
+  await requestNext(requestPromiseList)
+}
+
 const FILE_CHUNK_SIZE = 1024 * 1024 * 5
 
 class App extends Component{
@@ -49,14 +60,22 @@ class App extends Component{
   extName = ""
   progress = 0;
   fileSize = 0;
+  PER_MAX_REQUEST_NUMBER = 100;
 
   state = {
     datalist: [],
+    fileURL: "",
+    uploadSuccess: false,
+    upload: false,
+    checkProgress: 0,
   }
 
   handleChangeFile = async (file) => {
-    const extName = await isAllowedFileType(file)
+    const extName = await getFileExtName(file)
     const fileChunks = createFileChunks(file, FILE_CHUNK_SIZE)
+    this.setState({
+      upload: true,
+    })
     const hash = await this.createHash(fileChunks)
     this.filename = hash
     this.extName = extName
@@ -76,7 +95,8 @@ class App extends Component{
 
   handleUpload = async () => {
     const self = this
-    const requestList = this.state.datalist.map(({ chunk, hash, fileName, extName }) => {
+    const requestList = []
+    const requests = this.state.datalist.map(({ chunk, hash, fileName, extName }) => {
       const formData = new FormData()
       formData.append("chunk", chunk)
       formData.append("hash", hash)
@@ -97,11 +117,34 @@ class App extends Component{
         self.calcProgress(progress.loaded)
       }
     }))
-
-    await Promise.all(requestList)
-    await this.handleMerge(this.filename, this.extName)
+    try {
+      // while(requests.length) {
+      //   requestList.push(requests.splice(0, this.PER_MAX_REQUEST_NUMBER))
+      // }
+      // console.log(requestList);
+      // await requestNext(requestList)
+			await Promise.all(requests)
+      const { data: { url } } = await this.handleMerge(this.filename, this.extName)
+      if(url) {
+        this.setState({
+          uploadSuccess: true,
+          fileURL: url,
+        })
+      }
+      console.log(url)
+    } catch (error) {
+      this.setState({
+        uploadSuccess: false,
+      })
+      console.log(error)
+    }
   }
 
+	/**
+	 * 生成文件hash
+	 * @param fileChunks: {Array<Buffer>} 文件buffer chunk
+	 * @return {Promise<unknown>}
+	 */
   createHash = (fileChunks) => {
     return new Promise((resolve) => {
       const worker = new Worker("/hash-worker.js")
@@ -109,6 +152,9 @@ class App extends Component{
       worker.onmessage = e => {
         const { percentage, hash } = e.data
         console.log(percentage, hash);
+        this.setState({
+          checkProgress: percentage,
+        })
         if(hash) {
           resolve(hash)
         }
@@ -117,25 +163,50 @@ class App extends Component{
   }
 
   handleMerge = (filename, extName) => {
-    xhr({
+    return xhr({
       method: "POST",
       url: "/upload/merge",
       data: {
         filename,
         extName,
       }
+    }).then(res => {
+      return res
     })
   }
 
   calcProgress = (progress) => {
     this.progress += progress
     // console.log(Math.floor(this.progress / this.fileSize * 100) + '%', this.fileSize)
-  } 
+  }
 
   render() {
     return (
       <div className="App">
         <button onClick={() => produceFile(this.handleChangeFile)}>選擇文件</button>
+        <div>
+          {
+            this.state.upload ?
+              <span>校验中：{Number(this.state.checkProgress).toFixed(2)}%</span>
+              : null
+          }
+        </div>
+        <div>
+          {
+            this.state.uploadSuccess ?
+              <span>
+                文件地址：
+                <a
+                  href={this.state.fileURL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {this.state.fileURL}
+                </a>
+              </span>
+              : null
+          }
+        </div>
         <div>
           <ul>
             {
